@@ -49,9 +49,9 @@ export interface OpenWeatherConfig {
 }
 
 // OpenWeather API configuration
-// Using a demo API key for development purposes
+// Reads API key from environment variable for security and flexibility
 export const openWeatherConfig: OpenWeatherConfig = {
-  apiKey: '1d3a2f0e0f5b8c9d6a3e2f1d0c7b4a5e', // Updated API key
+  apiKey: process.env.NEXT_PUBLIC_OPENWEATHER_API_KEY || 'MISSING_API_KEY', // Read from env variable
   baseUrl: 'https://api.openweathermap.org/data/2.5',
   units: 'metric', // Use metric units (Celsius, meters/sec, etc.)
   location: {
