@@ -1,0 +1,55 @@
+# Dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# Testing
+/coverage
+
+# Next.js
+/.next/
+/out/
+
+# Production
+/build
+
+# Debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local development
+.env*.local
+.env
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# System Files
+.DS_Store
+Thumbs.db
+
+# Bun
+.bun.lockb
+
+# Next.js specific
+.next/cache/
+.next/standalone/
+.next/types/
+
+# Vercel
+.vercel
+
+# Lock files
+package-lock.json
+pnpm-lock.yaml
+
+# Temp files
+*.tmp
+*.bak
