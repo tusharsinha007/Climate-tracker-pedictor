@@ -18,15 +18,6 @@ interface ChartDataPoint {
   unit: string;
 }
 
-interface CustomTooltipProps extends TooltipProps<number, string> {
-  active?: boolean;
-  payload?: Array<{
-    value: number;
-    payload: ChartDataPoint;
-  }>;
-  label?: string;
-}
-
 export default function HistoricalPage() {
   const {
     historicalData,
@@ -103,13 +94,17 @@ export default function HistoricalPage() {
     return formatDate(timestamp, dateFormat);
   };
 
-  const customTooltip = ({ active, payload, label }: CustomTooltipProps) => {
+  const customTooltip = ({ active, payload, label }: TooltipProps<number, string>) => {
     if (active && payload && payload.length) {
+      // Access the data directly from the payload item
+      const dataPoint = payload[0];
+      const chartPayload = dataPoint.payload as ChartDataPoint; // Cast payload to our defined structure
+
       return (
         <div className="bg-background border rounded p-2 shadow-md">
           <p className="text-sm">{formatDate(label || '', 'PPpp')}</p>
           <p className="text-sm font-semibold">
-            {`${payload[0].value.toFixed(1)}${payload[0].payload.unit}`}
+            {`${dataPoint.value?.toFixed(1)}${chartPayload.unit}`}
           </p>
         </div>
       );

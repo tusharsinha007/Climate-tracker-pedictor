@@ -1,7 +1,21 @@
 // OpenWeather API service functions
 import { openWeatherConfig, openWeatherEndpoints, buildOpenWeatherUrl, getWindDirection, convertTimestampToISOString } from './openweather';
 import { ClimateData, PredictionData, TimeRange, PredictionTimeFrame } from './store';
-import { chennaiHistoricalData, chennaiMonthlyAverages } from '../data/chennai_climate';
+import { chennaiHistoricalData, chennaiMonthlyAverages, getPredictionData as getLocalPredictionData } from '@/data/chennai_climate';
+
+// Define weather priority mapping at module level
+const weatherPriority = {
+  thunderstorm: 7,
+  snow: 6,
+  rain: 5,
+  drizzle: 4,
+  atmosphere: 3, // fog, mist, etc.
+  clouds: 2,
+  clear: 1,
+};
+
+// Define a type for the keys of weatherPriority at module level
+type WeatherConditionMain = keyof typeof weatherPriority;
 
 // Interface for OpenWeather current weather response
 interface OpenWeatherCurrentResponse {
@@ -452,6 +466,124 @@ function getPredictionDataFromLocal(timeframe: PredictionTimeFrame): PredictionD
   return result;
 }
 
+// Function to aggregate forecast data by day (defined before use)
+async function aggregateForecastData(forecastData: OpenWeatherForecastResponse, airPollutionData: OpenWeatherAirPollutionResponse, timeframe: PredictionTimeFrame): Promise<PredictionData[]> {
+  // Process forecast data
+  const dailyForecasts: Map<string, {
+    date: string;
+    temps: number[];
+    minTemp: number;
+    maxTemp: number;
+    humidity: number[];
+    precipitation: number;
+    precipProbability: number;
+    weatherCondition?: PredictionData['predictions']['weatherCondition'];
+  }> = new Map();
+
+  forecastData.list.forEach(item => {
+    const date = item.dt_txt.split(' ')[0];
+    if (!dailyForecasts.has(date)) {
+      dailyForecasts.set(date, {
+        date,
+        temps: [],
+        minTemp: item.main.temp_min,
+        maxTemp: item.main.temp_max,
+        humidity: [],
+        precipitation: 0,
+        precipProbability: 0,
+        weatherCondition: undefined,
+      });
+    }
+
+    const dayData = dailyForecasts.get(date)!;
+
+    dayData.temps.push(item.main.temp);
+    dayData.minTemp = Math.min(dayData.minTemp, item.main.temp_min);
+    dayData.maxTemp = Math.max(dayData.maxTemp, item.main.temp_max);
+    dayData.humidity.push(item.main.humidity);
+    dayData.precipitation += item.rain?.['3h'] || 0;
+    dayData.precipProbability = Math.max(dayData.precipProbability, item.pop * 100);
+
+    // Prioritize extreme weather conditions
+    if (item.weather[0]) {
+      const currentMain = item.weather[0].main.toLowerCase() as WeatherConditionMain;
+      const currentDesc = item.weather[0].description;
+      const currentIcon = item.weather[0].icon;
+      const existingMain = dayData.weatherCondition?.main.toLowerCase() as WeatherConditionMain | undefined;
+
+      const currentPriority = weatherPriority[currentMain] || 0;
+      const existingPriority = existingMain ? (weatherPriority[existingMain] || 0) : 0;
+
+      if (currentPriority >= existingPriority) { // Update if higher or equal priority (keeps most recent severe)
+        dayData.weatherCondition = {
+          main: item.weather[0].main,
+          description: currentDesc,
+          icon: currentIcon
+        };
+      }
+    }
+  });
+
+  // Convert to PredictionData array
+  const predictions: PredictionData[] = Array.from(dailyForecasts.values()).map(day => {
+    // Calculate average temperature
+    const avgTemp = day.temps.reduce((sum, temp) => sum + temp, 0) / day.temps.length;
+    
+    // Calculate average humidity
+    const avgHumidity = day.humidity.reduce((sum, hum) => sum + hum, 0) / day.humidity.length;
+    
+    // Find matching air quality data (using the first entry of the day as an approximation)
+    const dayStart = new Date(day.date + 'T00:00:00Z').getTime() / 1000;
+    const dayEnd = new Date(day.date + 'T23:59:59Z').getTime() / 1000;
+    
+    const dayAirQuality = airPollutionData.list.find(item => 
+      item.dt >= dayStart && item.dt <= dayEnd
+    );
+    
+    // Calculate AQI index and category
+    let aqiIndex = 0;
+    let aqiCategory = 'Good';
+    
+    if (dayAirQuality) {
+      // Use PM2.5 and PM10 for AQI calculation (simplified)
+      aqiIndex = Math.round((dayAirQuality.components.pm2_5 + dayAirQuality.components.pm10) / 2);
+      
+      // Determine AQI category
+      if (aqiIndex > 150) aqiCategory = 'Unhealthy';
+      else if (aqiIndex > 100) aqiCategory = 'Unhealthy for Sensitive Groups';
+      else if (aqiIndex > 50) aqiCategory = 'Moderate';
+    }
+    
+    return {
+      date: day.date,
+      predictions: {
+        temperature: {
+          min: Math.round(day.minTemp * 10) / 10,
+          max: Math.round(day.maxTemp * 10) / 10,
+          avg: Math.round(avgTemp * 10) / 10
+        },
+        precipitation: {
+          probability: Math.round(day.precipProbability),
+          amount: Math.round(day.precipitation * 10) / 10
+        },
+        airQuality: {
+          index: aqiIndex,
+          category: aqiCategory
+        },
+        humidity: Math.round(avgHumidity),
+        weatherCondition: day.weatherCondition
+      }
+    };
+  });
+  
+  // Limit the number of days based on the requested timeframe
+  const daysToInclude = timeframe === '24h' ? 1 :
+                       timeframe === '7d' ? 5 : // Limited by free API to 5 days
+                       5; // Default to 5 days (max available in free tier)
+  
+  return predictions.slice(0, daysToInclude);
+}
+
 // Function to fetch weather forecast data from OpenWeather
 export async function fetchWeatherForecast(timeframe: PredictionTimeFrame): Promise<PredictionData[]> {
   try {
@@ -460,159 +592,26 @@ export async function fetchWeatherForecast(timeframe: PredictionTimeFrame): Prom
     const forecastResponse = await fetch(forecastUrl);
     if (!forecastResponse.ok) {
       console.warn(`Failed to fetch forecast: ${forecastResponse.statusText}. Using local data instead.`);
-      return getPredictionDataFromLocal(timeframe);
+      return getLocalPredictionData(timeframe);
     }
     const forecastData: OpenWeatherForecastResponse = await forecastResponse.json();
-    
-    // Fetch air pollution forecast
-    const airPollutionUrl = buildOpenWeatherUrl(openWeatherEndpoints.airPollution, { start: Math.floor(Date.now() / 1000), end: Math.floor(Date.now() / 1000) + (5 * 24 * 60 * 60) });
+
+    // Fetch air pollution forecast (adjust start/end as needed)
+    const airPollutionUrl = buildOpenWeatherUrl(openWeatherEndpoints.airPollution);
     const airPollutionResponse = await fetch(airPollutionUrl);
-    if (!airPollutionResponse.ok) {
-      console.warn(`Failed to fetch air pollution forecast: ${airPollutionResponse.statusText}. Using local data instead.`);
-      return getPredictionDataFromLocal(timeframe);
+    let airPollutionData: OpenWeatherAirPollutionResponse = { list: [] }; // Default empty list
+    if (airPollutionResponse.ok) {
+      airPollutionData = await airPollutionResponse.json();
+    } else {
+      console.warn(`Failed to fetch air pollution forecast: ${airPollutionResponse.statusText}.`);
+      // Proceed without air pollution data if it fails
     }
-    const airPollutionData: OpenWeatherAirPollutionResponse = await airPollutionResponse.json();
-    
-    // Process forecast data
-    const dailyForecasts: Map<string, {
-      temps: number[];
-      minTemp: number;
-      maxTemp: number;
-      humidity: number[];
-      precipitation: number;
-      precipProbability: number;
-      date: string;
-      weatherCondition?: {
-        main: string;
-        description: string;
-        icon: string;
-      };
-    }> = new Map();
-    
-    // Group forecast data by day
-    forecastData.list.forEach(item => {
-      const date = new Date(item.dt * 1000).toISOString().split('T')[0];
-      
-      if (!dailyForecasts.has(date)) {
-        dailyForecasts.set(date, {
-          temps: [],
-          minTemp: item.main.temp_min,
-          maxTemp: item.main.temp_max,
-          humidity: [],
-          precipitation: 0,
-          precipProbability: 0,
-          date,
-          // Store weather condition information
-          weatherCondition: item.weather[0] ? {
-            main: item.weather[0].main,
-            description: item.weather[0].description,
-            icon: item.weather[0].icon
-          } : undefined
-        });
-      }
-      
-      const dayData = dailyForecasts.get(date)!;
-      dayData.temps.push(item.main.temp);
-      dayData.minTemp = Math.min(dayData.minTemp, item.main.temp_min);
-      dayData.maxTemp = Math.max(dayData.maxTemp, item.main.temp_max);
-      dayData.humidity.push(item.main.humidity);
-      dayData.precipitation += item.rain?.['3h'] || 0;
-      dayData.precipProbability = Math.max(dayData.precipProbability, item.pop * 100);
-      
-      // Update weather condition with the most significant one for the day
-      // Prioritize extreme weather conditions (thunderstorm, rain, snow) over clear/clouds
-      if (item.weather[0]) {
-        const currentMain = item.weather[0].main.toLowerCase();
-        const currentDesc = item.weather[0].description;
-        const currentIcon = item.weather[0].icon;
-        
-        const existingMain = dayData.weatherCondition?.main.toLowerCase();
-        
-        // Priority order: Thunderstorm > Snow > Rain > Drizzle > Atmosphere > Clouds > Clear
-        const weatherPriority = {
-          'thunderstorm': 7,
-          'snow': 6,
-          'rain': 5,
-          'drizzle': 4,
-          'atmosphere': 3, // fog, mist, etc.
-          'clouds': 2,
-          'clear': 1
-        };
-        
-        const currentPriority = weatherPriority[currentMain] || 0;
-        const existingPriority = existingMain ? (weatherPriority[existingMain] || 0) : 0;
-        
-        if (currentPriority > existingPriority) {
-          dayData.weatherCondition = {
-            main: item.weather[0].main,
-            description: currentDesc,
-            icon: currentIcon
-          };
-        }
-      }
-    });
-    
-    // Convert to PredictionData array
-    const predictions: PredictionData[] = Array.from(dailyForecasts.values()).map(day => {
-      // Calculate average temperature
-      const avgTemp = day.temps.reduce((sum, temp) => sum + temp, 0) / day.temps.length;
-      
-      // Calculate average humidity
-      const avgHumidity = day.humidity.reduce((sum, hum) => sum + hum, 0) / day.humidity.length;
-      
-      // Find matching air quality data (using the first entry of the day as an approximation)
-      const dayStart = new Date(day.date + 'T00:00:00Z').getTime() / 1000;
-      const dayEnd = new Date(day.date + 'T23:59:59Z').getTime() / 1000;
-      
-      const dayAirQuality = airPollutionData.list.find(item => 
-        item.dt >= dayStart && item.dt <= dayEnd
-      );
-      
-      // Calculate AQI index and category
-      let aqiIndex = 0;
-      let aqiCategory = 'Good';
-      
-      if (dayAirQuality) {
-        // Use PM2.5 and PM10 for AQI calculation (simplified)
-        aqiIndex = Math.round((dayAirQuality.components.pm2_5 + dayAirQuality.components.pm10) / 2);
-        
-        // Determine AQI category
-        if (aqiIndex > 150) aqiCategory = 'Unhealthy';
-        else if (aqiIndex > 100) aqiCategory = 'Unhealthy for Sensitive Groups';
-        else if (aqiIndex > 50) aqiCategory = 'Moderate';
-      }
-      
-      return {
-        date: day.date,
-        predictions: {
-          temperature: {
-            min: Math.round(day.minTemp * 10) / 10,
-            max: Math.round(day.maxTemp * 10) / 10,
-            avg: Math.round(avgTemp * 10) / 10
-          },
-          precipitation: {
-            probability: Math.round(day.precipProbability),
-            amount: Math.round(day.precipitation * 10) / 10
-          },
-          airQuality: {
-            index: aqiIndex,
-            category: aqiCategory
-          },
-          humidity: Math.round(avgHumidity),
-          weatherCondition: day.weatherCondition
-        }
-      };
-    });
-    
-    // Limit the number of days based on the requested timeframe
-    const daysToInclude = timeframe === '24h' ? 1 :
-                         timeframe === '7d' ? 5 : // Limited by free API to 5 days
-                         5; // Default to 5 days (max available in free tier)
-    
-    return predictions.slice(0, daysToInclude);
+
+    // Aggregate forecast data by day
+    return await aggregateForecastData(forecastData, airPollutionData, timeframe);
   } catch (error) {
     console.error('Error fetching weather forecast data:', error);
     // Fallback to local data if API call fails
-    return getPredictionDataFromLocal(timeframe);
+    return getLocalPredictionData(timeframe);
   }
 }

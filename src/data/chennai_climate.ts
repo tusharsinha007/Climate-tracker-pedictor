@@ -462,10 +462,31 @@ export function getCurrentClimateData(): ChennaiClimateRecord {
   };
 }
 
+// Interface for the structure of prediction data
+export interface PredictionData {
+  date: string;
+  predictions: {
+    temperature: {
+      min: number;
+      max: number;
+      avg: number;
+    };
+    precipitation: {
+      probability: number;
+      amount: number;
+    };
+    airQuality: {
+      index: number;
+      category: string;
+    };
+    humidity: number;
+  };
+}
+
 // Function to generate prediction data based on historical patterns
-export function getPredictionData(timeframe: string): any[] {
+export function getPredictionData(timeframe: string): PredictionData[] {
   const now = new Date();
-  const predictions = [];
+  const predictions: PredictionData[] = [];
   
   // Determine how many days to predict based on the timeframe
   const daysToPredict = timeframe === '24h' ? 1 : // 1 day with hourly predictions

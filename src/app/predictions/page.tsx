@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import Image from "next/image";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -135,7 +136,7 @@ export default function PredictionsPage() {
                             label={{ value: 'Temperature (°C)', angle: -90, position: 'insideLeft' }}
                             tick={{ fontSize: 12 }}
                           />
-                          <Tooltip formatter={(value) => [`${value.toFixed(1)}°C`, '']} />
+                          <Tooltip formatter={(value) => typeof value === 'number' ? [`${value.toFixed(1)}°C`, ''] : [String(value), '']} />
                           <Legend />
                           <Area
                             type="monotone"
@@ -190,8 +191,9 @@ export default function PredictionsPage() {
                           />
                           <Tooltip
                             formatter={(value, name) => {
-                              if (name === "Probability") return [`${value.toFixed(0)}%`, name];
-                              return [`${value.toFixed(1)} mm`, name];
+                              if (typeof value !== 'number') return [String(value), name as string];
+                              if (name === "Probability") return [`${value.toFixed(0)}%`, name as string];
+                              return [`${value.toFixed(1)} mm`, name as string];
                             }}
                           />
                           <Legend />
@@ -231,7 +233,7 @@ export default function PredictionsPage() {
                             label={{ value: 'Air Quality Index', angle: -90, position: 'insideLeft' }}
                             tick={{ fontSize: 12 }}
                           />
-                          <Tooltip formatter={(value) => [`${value}`, 'AQI']} />
+                          <Tooltip formatter={(value) => typeof value === 'number' ? [`${value.toFixed(0)}`, 'AQI'] : [String(value), 'AQI']} />
                           <Legend />
                           <Line
                             type="monotone"
@@ -262,7 +264,7 @@ export default function PredictionsPage() {
                             label={{ value: 'Humidity (%)', angle: -90, position: 'insideLeft' }}
                             tick={{ fontSize: 12 }}
                           />
-                          <Tooltip formatter={(value) => [`${value.toFixed(1)}%`, 'Humidity']} />
+                          <Tooltip formatter={(value) => typeof value === 'number' ? [`${value.toFixed(1)}%`, 'Humidity'] : [String(value), 'Humidity']} />
                           <Legend />
                           <Line
                             type="monotone"
@@ -305,10 +307,12 @@ export default function PredictionsPage() {
                         </div>
                         <div className="flex items-center gap-2">
                           {prediction.predictions.weatherCondition && prediction.predictions.weatherCondition.icon ? (
-                            <img 
-                              src={getWeatherIconUrl(prediction.predictions.weatherCondition.icon)} 
-                              alt="Weather icon" 
-                              className="h-8 w-8" 
+                            <Image
+                              src={getWeatherIconUrl(prediction.predictions.weatherCondition.icon)}
+                              alt="Weather icon"
+                              width={32}
+                              height={32}
+                              className="h-8 w-8"
                             />
                           ) : (
                             <span className="text-xl">

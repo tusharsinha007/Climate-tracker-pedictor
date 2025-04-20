@@ -1,5 +1,42 @@
 // OpenWeather API configuration and utility functions
 
+// Weather condition interface
+export interface WeatherCondition {
+  main: string;
+  description: string;
+  icon: string;
+}
+
+// Temperature prediction interface
+export interface TemperaturePrediction {
+  min: number;
+  max: number;
+  avg: number;
+}
+
+// Precipitation prediction interface
+export interface PrecipitationPrediction {
+  probability: number;
+  amount: number;
+}
+
+// Air quality prediction interface
+export interface AirQualityPrediction {
+  index: number;
+}
+
+// Weather prediction interface
+export interface WeatherPrediction {
+  date: string;
+  predictions: {
+    temperature: TemperaturePrediction;
+    precipitation: PrecipitationPrediction;
+    airQuality: AirQualityPrediction;
+    humidity: number;
+    weatherCondition?: WeatherCondition;
+  };
+}
+
 export interface OpenWeatherConfig {
   apiKey: string;
   baseUrl: string;
@@ -34,7 +71,7 @@ export const openWeatherEndpoints = {
 };
 
 // Function to build OpenWeather API URL with parameters
-export function buildOpenWeatherUrl(endpoint: string, params: Record<string, any> = {}): string {
+export function buildOpenWeatherUrl(endpoint: string, params: Record<string, string | number | boolean> = {}): string {
   const url = new URL(`${openWeatherConfig.baseUrl}${endpoint}`);
   
   // Add API key and default parameters
